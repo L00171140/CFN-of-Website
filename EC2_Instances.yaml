@@ -1,0 +1,250 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: This Template will launch one public instance and one private instance. Inside the the private instance apache server is launched and cloned the git url of the Ganesh Gowdar website.
+
+Parameters: 
+  VpcId: 
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: vpc-0ae6145920ccf1508
+
+  PublicSubnet1:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone 
+    Type: String
+    Default: subnet-06bfb06abd025ab64
+
+  PublicSubnet2:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone 
+    Type: String
+    Default: subnet-0b1ac600a4d182dfa
+
+  PrivateSubnet1:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: subnet-045e429c1070cdefd
+
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues: [t2.micro]
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+  LoadBalancerName:
+    Description: Application Name
+    Type: String
+    AllowedPattern: "[A-Za-z0-9]+"
+    Default: new
+  
+  Environment:
+    AllowedValues: [dev,qa,prod]
+    Default: dev
+    Description: The name of the Environment
+    Type: String
+
+Mappings:
+  #  This is the Amazon Linux 2 AMI.  Adjust these values as needed, they can change a few times per year:
+  UbuntuAMI:
+    us-east-1:
+      AMI: ami-08c40ec9ead489470   # N Virginia
+    us-east-2:
+      AMI: ami-097a2df4ac947655f    # Ohio      
+    us-west-1:
+      AMI: ami-02ea247e531eb3ce6   # N California
+    us-west-2:
+      AMI: ami-017fecd1353bcc96e    # Oregon
+    eu-west-1:
+      AMI: ami-096800910c1b781ba    # Ireland
+    eu-central-1:
+      AMI: aami-0caef02b518350c8b   # Frankfurt
+
+
+Resources:
+
+  AppserverElbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: 
+          Fn::ImportValue:
+            !Sub VPCId 
+      GroupDescription: ELB Security Group
+      SecurityGroupIngress:
+        - FromPort: 80
+          IpProtocol: tcp
+          CidrIp: 0.0.0.0/0
+          ToPort: 80
+          Description: Allow from internat
+      Tags:
+        - Key: Name
+          Value: !Sub '${LoadBalancerName}-appserver-elb-sg'
+
+  AppServerSG:
+    Type: AWS::EC2::SecurityGroup    
+    Properties:
+      VpcId:
+          Fn::ImportValue:
+            !Sub VPCId 
+      GroupDescription: Web Server Security Group
+      SecurityGroupIngress:
+        - FromPort: 80
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref AppserverElbSG
+          ToPort: 80
+          Description: Allow SSH from bastion subnet 
+        - FromPort: 22
+          IpProtocol: tcp 
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH from Bastion Subnet                              
+      Tags:
+      - Key: Name
+        Value: !Sub '${LoadBalancerName}-appserver-sg'
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${LoadBalancerName}-${Environment}-alb'
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: 600
+      SecurityGroups: 
+        - !Ref AppserverElbSG
+      Subnets:
+        - Fn::ImportValue:
+            !Sub PublicSubnet1Id
+        - Fn::ImportValue:
+            !Sub PublicSubnet2Id
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ListenerRule1:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: User-Agent
+            Values:
+              - Mozilla
+      Actions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 3
+      HealthCheckPath: /index.html
+      Matcher:
+        HttpCode: 200
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 20
+      VpcId:
+          Fn::ImportValue:
+            !Sub VPCId 
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 3
+      Targets:
+      - Id: !Ref EC2Instance
+        Port: 80
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds: 
+        - !Ref AppServerSG
+      KeyName: !Ref KeyName
+      ImageId: !FindInMap [ UbuntuAMI, !Ref "AWS::Region", AMI]
+      SubnetId:
+          Fn::ImportValue:
+            !Sub PrivateSubnet1Id
+      Tags:
+        - Key: Name
+          Value: JumpInstance
+      UserData:
+        Fn::Base64: !Sub
+        #THis script will install apache sever in privte instance and clone the Ganesh Gowdar website stored in the github
+        - |
+          #!/bin/bash
+          sudo apt update -y
+          sudo apt install apache2 -y
+          cd /var/www/html
+          sudo rm index.html
+          sudo git clone https://github.com/L00171140/My-Website.git
+          sudo mv /var/www/html/My-Website/* /var/www/html
+        - {
+          }    
+
+  EC2JumpHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyName
+      ImageId: !FindInMap [ UbuntuAMI, !Ref "AWS::Region", AMI]
+      InstanceType: !Ref InstanceType
+      SubnetId:
+          Fn::ImportValue:
+            !Sub PublicSubnet1Id
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: JumpInstance
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: AllowEC2Traffic
+      GroupDescription: Enable SSH access and HTTP access on the inbound port
+      VpcId:
+          Fn::ImportValue:
+            !Sub VPCId  
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: InstanceSecurityGroup
+
+Outputs:
+  AppELBDNS:
+    Description: InstanceId of the newly created EC2 instance
+    Value: !GetAtt [ApplicationLoadBalancer, DNSName]

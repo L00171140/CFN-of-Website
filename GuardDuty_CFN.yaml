@@ -1,0 +1,6 @@
+Resources:
+  GuardDutyDetector:
+      Type: AWS::GuardDuty::Detector
+      Properties:
+          Enable: True
+          FindingPublishingFrequency: FIFTEEN_MINUTES

@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description:  This template is Nested cloudfomation stack which launches a personal webiste using VPC, public intsance, private instance and https://cfn-scripts-for-infra.s3.amazonaws.com/GuardDuty_CFN.yaml  
+Parameters:
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+    - t1.micro
+    - t2.nano
+    - t2.micro
+    - t2.small
+    - t2.medium
+    - t2.large
+    - m1.small
+    - m1.medium
+    - m1.large
+    - m1.xlarge
+    - m2.xlarge
+    - m2.2xlarge
+    - m2.4xlarge
+    - m3.medium
+    - m3.large
+    - m3.xlarge
+    - m3.2xlarge
+    - m4.large
+    - m4.xlarge
+    - m4.2xlarge
+    - m4.4xlarge
+    - m4.10xlarge
+    - c1.medium
+    - c1.xlarge
+    - c3.large
+    - c3.xlarge
+    - c3.2xlarge
+    - c3.4xlarge
+    - c3.8xlarge
+    - c4.large
+    - c4.xlarge
+    - c4.2xlarge
+    - c4.4xlarge
+    - c4.8xlarge
+    - g2.2xlarge
+    - g2.8xlarge
+    - r3.large
+    - r3.xlarge
+    - r3.2xlarge
+    - r3.4xlarge
+    - r3.8xlarge
+    - i2.xlarge
+    - i2.2xlarge
+    - i2.4xlarge
+    - i2.8xlarge
+    - d2.xlarge
+    - d2.2xlarge
+    - d2.4xlarge
+    - d2.8xlarge
+    - hi1.4xlarge
+    - hs1.8xlarge
+    - cr1.8xlarge
+    - cc2.8xlarge
+    - cg1.4xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    AllowedValues: [Dev,Test,Prod]
+
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.192.0.0/20
+
+  PublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 10.192.10.0/28
+
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.192.11.0/28
+
+  PrivateSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.192.12.0/28
+
+  PrivateSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.192.13.0/28
+
+Mappings:
+  #  This is the Ubuntu AMI.  Adjust the values as needed, they can change a few times per year:
+  UbuntuAMI:
+    us-east-1:
+      AMI: ami-08c40ec9ead489470   # N Virginia
+    us-east-2:
+      AMI: ami-097a2df4ac947655f    # Ohio      
+    us-west-1:
+      AMI: ami-02ea247e531eb3ce6   # N California
+    us-west-2:
+      AMI: ami-017fecd1353bcc96e    # Oregon
+    eu-west-1:
+      AMI: ami-096800910c1b781ba    # Ireland
+    eu-central-1:
+      AMI: aami-0caef02b518350c8b   # Frankfurt
+
+
+Resources:
+  VPCNestedStack:
+  #This stack launches the VPC resource 
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: >-
+        https://cfn-scripts-for-infra.s3.amazonaws.com/VPC_CFN.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcCIDR : !Ref VpcCIDR
+        PublicSubnet1CIDR : !Ref PublicSubnet1CIDR
+        PublicSubnet2CIDR : !Ref PublicSubnet2CIDR
+        PrivateSubnet1CIDR : !Ref PrivateSubnet1CIDR
+        PrivateSubnet2CIDR : !Ref PrivateSubnet2CIDR
+
+  EC2NestedStack:
+  #This stack launches the public intsnacinstancee and private instance
+    Type: 'AWS::CloudFormation::Stack'
+    DependsOn: VPCNestedStack
+    Properties:
+      TemplateURL: >-
+       https://cfn-scripts-for-infra.s3.amazonaws.com/EC2_Instances.yaml
+      Parameters:
+        InstanceType: t2.micro
+        KeyName: !Ref KeyName    
+
+#This stack launches the GuardDuty resource 
+  GuardDutyStack:
+    Type: 'AWS::CloudFormation::Stack'
+    DependsOn: VPCNestedStack
+    Properties:
+      TemplateURL: >-
+       https://cfn-scripts-for-infra.s3.amazonaws.com/GuardDuty_CFN.yaml
+
+
+
+
+
+
+
+
